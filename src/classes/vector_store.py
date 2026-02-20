@@ -1,6 +1,6 @@
 import numpy as np
 
-
+# 
 class VectorStore:
     def __init__(self):
         self.store = {}  # ID -> Vector Embedding
