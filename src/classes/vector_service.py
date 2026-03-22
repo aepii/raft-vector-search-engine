@@ -5,8 +5,8 @@ from .embedding_model import EmbeddingModel
 from .vector_store import VectorStore
 
 
-class VectorSearchService:
-    """High-level service to manage adding items and performing semantic searches."""
+class VectorService:
+    """High-level service for embedding text and performing semantic search over stored items."""
 
     def __init__(self):
         """Initializes the service and its dependencies."""
@@ -21,8 +21,8 @@ class VectorSearchService:
             item_id: The ID for the new entry.
             text: The text to be indexed.
         """
-        embedding = self.embedding_model.encode(text)
-        self.vector_store.upsert(item_id, text, embedding)
+        query_embedding = self.embedding_model.encode(text)
+        self.vector_store.upsert(item_id, text, query_embedding)
 
     def search(self, text: str, top_k: int = 3) -> List[str]:
         """
@@ -36,13 +36,15 @@ class VectorSearchService:
             A list of strings representing the top matches.
         """
         # Encode the query string
-        embedding = self.embedding_model.encode(text)
+        query_embedding = self.embedding_model.encode(text)
         # Extract ids from the store
         ids = list(self.vector_store.store.keys())
         # Convert the store's values into a matrix
-        embeddings = np.array(list(self.vector_store.store.values()))
+        candidate_embeddings = np.array(list(self.vector_store.store.values()))
         # Calculate similarities
-        similarities = self.embedding_model.similarity(embedding, embeddings)
+        similarities = self.embedding_model.similarity(
+            query_embedding, candidate_embeddings
+        )
         # Get the top indices
         top_results = torch.argsort(similarities, descending=True)[0][:top_k]
 
