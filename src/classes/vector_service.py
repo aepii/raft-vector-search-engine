@@ -24,7 +24,7 @@ class VectorService:
         query_embedding = self.embedding_model.encode(text)
         self.vector_store.upsert(item_id, text, query_embedding)
 
-    def search(self, text: str, top_k: int = 3) -> List[str]:
+    def search(self, text: str, top_k: int = 3) -> list[tuple[str, float]]:
         """
         Performs a semantic search against the stored vectors.
 
@@ -48,5 +48,8 @@ class VectorService:
         # Get the top indices
         top_results = torch.argsort(similarities, descending=True)[0][:top_k]
 
-        # Return the mapped indices back to metadat
-        return [(self.vector_store.metadata[ids[i]]) for i in top_results]
+        # Return the mapped indices back to metadata
+        return [
+            (self.vector_store.metadata[ids[i]], float(similarities[0][i]))
+            for i in top_results
+        ]

@@ -25,5 +25,10 @@ message SearchRequest {
 }
 
 message SearchResponse {
-    repeated string results = 1;
+    repeated SearchResult results = 1;
+}
+
+message SearchResult {
+    string text = 1;
+    float score = 2;
 }

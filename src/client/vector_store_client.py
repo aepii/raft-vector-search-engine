@@ -6,13 +6,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "localhost:50051")
+
 
 class VectorStoreClient:
     """Client SDK for interacting with the vector store via gRPC."""
 
     def __init__(self, host: str = None):
         """Initializes the client."""
-        self.host = host or os.getenv("SERVER_HOST", "localhost:50051")
+        self.host = host or COORDINATOR_HOST
         self.channel = grpc.insecure_channel(self.host)
         self.stub = vector_store_pb2_grpc.VectorStoreStub(self.channel)
 
@@ -44,7 +46,7 @@ class VectorStoreClient:
         """
         request = vector_store_pb2.SearchRequest(query_text=query, top_k=top_k)
         response = self.stub.Search(request)
-        return list(response.results)
+        return [(r.text, r.score) for r in response.results]
 
     def close(self):
         self.channel.close()

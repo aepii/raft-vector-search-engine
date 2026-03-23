@@ -94,6 +94,8 @@ def run_queries(client: VectorStoreClient):
         elapsed_ms = (time.perf_counter() - start) * 1000
         latencies.append(elapsed_ms)
         print(f"Query: {query} | {elapsed_ms:.2f}ms | {results}")
+        for text, score in results:
+            print(f"  [{score:.4f}] {text}")
 
     print(f"\nSearch Stats")
     print(f"Avg: {sum(latencies)/len(latencies):.2f}ms")
