@@ -16,15 +16,18 @@ message UpsertItem {
 }
 
 message UpsertRequest {
-  UpsertItem item = 1;
+  UpsertItem item     = 1;
+  string     trace_id = 2;
 }
 
 message UpsertResponse {
-  string status = 1;
+  string status   = 1;
+  string trace_id = 2;
 }
 
 message UpsertBatchRequest {
-  repeated UpsertItem items = 1;
+  repeated UpsertItem items    = 1;
+  string              trace_id = 2;
 }
 
 message UpsertBatchResponse {
@@ -35,6 +38,7 @@ message UpsertBatchResponse {
 message SearchRequest {
   string query_text = 1;
   int32  top_k      = 2;
+  string trace_id   = 3;
 }
 
 message SearchResponse {

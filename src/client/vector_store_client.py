@@ -2,11 +2,14 @@ import os
 import random
 import grpc
 import vector_store_pb2, vector_store_pb2_grpc
+from utils.logger import get_logger, new_trace_id
 from dotenv import load_dotenv
 
 load_dotenv()
 
 COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "localhost:50051")
+
+logger = get_logger("CLIENT")
 
 
 class VectorStoreClient:
@@ -29,10 +32,15 @@ class VectorStoreClient:
         Returns:
             A status message from the server indicating success or failure.
         """
+        trace_id = new_trace_id("upsert")
+        logger.info(f"[{trace_id}] [upsert] id={item_id}")
+
         request = vector_store_pb2.UpsertRequest(
-            item=vector_store_pb2.UpsertItem(id=item_id, text=text)
+            trace_id=trace_id, item=vector_store_pb2.UpsertItem(id=item_id, text=text)
         )
         response = self.stub.Upsert(request)
+
+        logger.info(f"[{trace_id}] response: {response.status}")
         return response.status
 
     def upsert_batch(self, items: list[tuple[int, str]]) -> list[str]:
@@ -45,12 +53,19 @@ class VectorStoreClient:
         Returns:
             A list of status messages from the server indicating success or failure.
         """
+        trace_id = new_trace_id("batch")
+        logger.info(f"[{trace_id}] [upsert_batch] size={len(items)}")
+
         request_items = [
             vector_store_pb2.UpsertItem(id=item_id, text=text)
             for item_id, text in items
         ]
-        request = vector_store_pb2.UpsertBatchRequest(items=request_items)
+        request = vector_store_pb2.UpsertBatchRequest(
+            trace_id=trace_id, items=request_items
+        )
         response = self.stub.UpsertBatch(request)
+
+        logger.info(f"[{trace_id}] batch complete, {len(response.statuses)} statuses")
         return list(response.statuses)
 
     def search(self, query: str, top_k: int = 3) -> list[str]:
@@ -64,8 +79,16 @@ class VectorStoreClient:
         Returns:
             A list of matching text results ranked by similarity.
         """
-        request = vector_store_pb2.SearchRequest(query_text=query, top_k=top_k)
+        trace_id = new_trace_id("search")
+        logger.info(f"[{trace_id}] [search] query='{query}' top_k={top_k}")
+
+        request = vector_store_pb2.SearchRequest(
+            trace_id=trace_id, query_text=query, top_k=top_k
+        )
         response = self.stub.Search(request)
+        results = [(result.text, result.score) for result in response.results]
+
+        logger.info(f"[{trace_id}] received {len(results)} results")
         return [(result.text, result.score) for result in response.results]
 
     def close(self):
