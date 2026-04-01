@@ -6,8 +6,8 @@ A *distributed system* for storing and querying [vector embeddings](https://www.
 ### 1. Clone the repository:
 
 ```bash
-git clone https://github.com/aepii/raft-vector-search-engine.git
-cd raft-vector-search-engine
+git clone https://github.com/aepii/vector-search-engine.git
+cd vector-search-engine
 ```
 
 ### 2. Setup a virtual environment:
@@ -47,11 +47,34 @@ cp .env.example .env
 ```
 
 ## Running Locally
-Open separate terminals for each component:
+
+Start each component in separate terminals.
+
+### 1. Navigate to the source directory
 ```bash
-# Terminal 1 — Server
-python src/server.py
- 
-# Terminal 2 — Client
-python src/client.py
+cd src
 ```
+
+### 2. Start the Coordinator
+```bash
+python -m coordinator
+```
+
+### 3. Start Server Nodes (Shards)
+
+Run one server per terminal:
+```bash
+$env:SERVER_HOST=50051; python -m server
+```
+```bash
+$env:SERVER_HOST=50052; python -m server
+```
+```bash
+$env:SERVER_HOST=50053; python -m server
+```
+
+### 4. Run Benchmark (after all services are ready)
+```bash
+python -m benchmarks.benchmark
+```
+
