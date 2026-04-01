@@ -1,16 +1,25 @@
+# Virtual environments
 venv/
 .venv/
 
+# Generated protobuf files (compiled from protos/vector_store.proto)
 src/vector_store_pb2.py
 src/vector_store_pb2_grpc.py
 src/vector_store_pb2.pyi
 
+# Python cache
 __pycache__/
 *.pyc
 
+# Persistent storage artifacts
 *.db
 *.log
 
+# Local environment config
 .env
 
+# Test cache
 .pytest_cache
+
+# Scratch space at project root (not for committed work)
+/scratch/
