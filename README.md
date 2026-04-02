@@ -53,11 +53,13 @@ cp .env.example .env
 Start each component in separate terminals.
 
 ### 1. Navigate to the source directory
+
 ```bash
 cd src
 ```
 
 ### 2. Start the Coordinator
+
 ```bash
 python -m coordinator
 ```
@@ -65,17 +67,21 @@ python -m coordinator
 ### 3. Start Server Nodes (Shards)
 
 Run one server per terminal:
+
 ```bash
-$env:SERVER_HOST=50051; python -m server
+$env:SERVER_PORT=50051; python -m server
 ```
+
 ```bash
-$env:SERVER_HOST=50052; python -m server
+$env:SERVER_PORT=50052; python -m server
 ```
+
 ```bash
-$env:SERVER_HOST=50053; python -m server
+$env:SERVER_PORT=50053; python -m server
 ```
 
 ### 4. Run Benchmark (after all services are ready)
+
 ```bash
 python -m benchmarks.benchmark
 ```

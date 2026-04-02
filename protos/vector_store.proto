@@ -49,3 +49,19 @@ message SearchResult {
   string text  = 1;
   float  score = 2;
 }
+
+// -- Coordinator control (coordinator only, not exposed on shards) --
+service CoordinatorControl {
+  rpc RegisterNode(NodeRequest) returns (NodeResponse);
+  rpc DeregisterNode(NodeRequest) returns (NodeResponse);
+}
+
+message NodeRequest {
+  string host = 1;
+}
+
+message NodeResponse {
+  bool   success    = 1;
+  string message    = 2;
+  int32  node_count = 3;
+}
