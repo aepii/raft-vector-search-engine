@@ -52,6 +52,10 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         statuses = [f"ID {item.id} indexed." for item in request.items]
         return vector_store_pb2.UpsertBatchResponse(statuses=statuses)
 
+    def Count(self, request, context):
+        count = len(self.service.vector_store.store)
+        return vector_store_pb2.CountResponse(count=count)
+
     def Search(self, request, context):
         """
         Performs a similarity search over the indexed vectors.

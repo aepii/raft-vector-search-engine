@@ -7,6 +7,8 @@ service VectorStore {
   rpc UpsertBatch(UpsertBatchRequest) returns (UpsertBatchResponse);
     // Client sends query string; Server returns top_k strings
   rpc Search(SearchRequest) returns (SearchResponse);
+    // Returns the number of items stored on this node
+  rpc Count(CountRequest) returns (CountResponse);
 }
 
 // -- Upsert --
@@ -49,6 +51,10 @@ message SearchResult {
   string text  = 1;
   float  score = 2;
 }
+
+// -- Count --
+message CountRequest {}
+message CountResponse { int32 count = 1; }
 
 // -- Coordinator control (coordinator only, not exposed on shards) --
 service CoordinatorControl {
