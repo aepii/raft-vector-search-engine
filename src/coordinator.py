@@ -6,6 +6,7 @@ from concurrent import futures
 import vector_store_pb2, vector_store_pb2_grpc
 from utils.hash_ring import ConsistentHashRing
 from utils.logger import get_logger
+from classes.embedding_model import EmbeddingModel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +24,7 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
         self._lock = threading.RLock()
         self._ring = ConsistentHashRing(virtual_nodes=150)
         self._stub_map: dict[str, vector_store_pb2_grpc.VectorStoreStub] = {}
+        self._embedding_model = EmbeddingModel()
 
         for host in (h.strip() for h in shard_hosts if h.strip()):
             self._add_node_locked(host)
@@ -52,7 +54,12 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
         logger.info(f"[{trace_id}] [Upsert] id={item.id} -> {host}")
 
-        response = stub.Upsert(request)
+        embedding = self._embedding_model.encode(item.text).tolist()
+        encoded_request = vector_store_pb2.UpsertRequest(
+            item=vector_store_pb2.UpsertItem(id=item.id, text=item.text, embedding=embedding),
+            trace_id=trace_id,
+        )
+        response = stub.Upsert(encoded_request)
 
         logger.info(f"[{trace_id}] [Upsert] id={item.id} complete: {response.status}")
 
@@ -63,11 +70,17 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
         logger.info(f"[{trace_id}] [UpsertBatch] received size={len(request.items)}")
 
+        texts = [item.text for item in request.items]
+        embeddings = self._embedding_model.encode(texts)
+
         shard_batches: dict[str, list] = {}
-        for item in request.items:
+        for item, embedding in zip(request.items, embeddings):
             host, _ = self._route(item.id)
             logger.info(f"[{trace_id}] item id={item.id} -> {host}")
-            shard_batches.setdefault(host, []).append(item)
+            encoded_item = vector_store_pb2.UpsertItem(
+                id=item.id, text=item.text, embedding=embedding.tolist()
+            )
+            shard_batches.setdefault(host, []).append(encoded_item)
 
         responses = []
         for host, batch in shard_batches.items():
@@ -100,6 +113,14 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
             f"[{trace_id}] [Search] query='{request.query_text[:40]}' top_k={request.top_k}"
         )
 
+        query_vector = self._embedding_model.encode(request.query_text).tolist()
+        encoded_request = vector_store_pb2.SearchRequest(
+            query_text=request.query_text,
+            top_k=request.top_k,
+            trace_id=trace_id,
+            query_vector=query_vector,
+        )
+
         with self._lock:
             stub_snapshot = list(self._stub_map.items())
 
@@ -107,7 +128,7 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
             host, stub = host_and_stub
             try:
                 start = time.perf_counter()
-                response = stub.Search(request)
+                response = stub.Search(encoded_request)
                 elapsed = (time.perf_counter() - start) * 1000
 
                 logger.info(

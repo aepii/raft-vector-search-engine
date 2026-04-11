@@ -12,8 +12,7 @@ import vector_store_pb2
 
 
 def test_upsert_handler_does_not_crash():
-    """Shard Upsert handler should return without error. Currently raises AttributeError
-    on `request.id` in the return statement (server.py:37) — should be request.item.id."""
+    """Shard Upsert handler should return without error and include item id in status."""
     from server import VectorStoreServicer
 
     with patch("server.VectorService") as MockService:
@@ -22,7 +21,7 @@ def test_upsert_handler_does_not_crash():
 
     request = vector_store_pb2.UpsertRequest(
         trace_id="repro-1",
-        item=vector_store_pb2.UpsertItem(id=42, text="hello"),
+        item=vector_store_pb2.UpsertItem(id=42, text="hello", embedding=[0.1, 0.2, 0.3]),
     )
 
     response = servicer.Upsert(request, context=MagicMock())

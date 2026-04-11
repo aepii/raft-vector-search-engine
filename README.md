@@ -46,6 +46,8 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
+All subsequent commands assume the virtual environment is active.
+
 ### 3.  Install Dependencies
 
 ```bash

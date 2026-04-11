@@ -5,10 +5,6 @@ import vector_store_pb2, vector_store_pb2_grpc
 from classes.vector_service import VectorService
 from utils.logger import get_logger
 from dotenv import load_dotenv
-import torch
-
-torch.set_num_threads(4)
-torch.set_num_interop_threads(1)
 
 load_dotenv()
 
@@ -31,7 +27,7 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         item = request.item
 
         logger.info(f"[{trace_id}] [Upsert] id={item.id}")
-        self.service.add_item(item.id, item.text)
+        self.service.add_item(item.id, item.text, list(item.embedding))
         logger.info(f"[{trace_id}] [Upsert] id={item.id} indexed")
 
         return vector_store_pb2.UpsertResponse(status=f"ID {request.item.id} indexed.")
@@ -44,7 +40,7 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
         logger.info(f"[{trace_id}] [UpsertBatch] size={len(request.items)}")
 
-        items = [(item.id, item.text) for item in request.items]
+        items = [(item.id, item.text, list(item.embedding)) for item in request.items]
         self.service.add_items_batch(items)
 
         logger.info(f"[{trace_id}] [UpsertBatch] indexed {len(items)} items")
@@ -64,7 +60,7 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
         logger.info(f"[{trace_id}] [Search] query='{request.query_text}'")
 
-        results = self.service.search(request.query_text, top_k=request.top_k)
+        results = self.service.search(list(request.query_vector), top_k=request.top_k)
 
         logger.info(f"[{trace_id}] [Search] returning {len(results)} results")
 
