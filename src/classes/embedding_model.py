@@ -1,5 +1,4 @@
 from typing import Union, List
-import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -23,15 +22,3 @@ class EmbeddingModel:
         """
         return self.model.encode(text)
 
-    def similarity(self, embedding: np.ndarray, embeddings: np.ndarray) -> torch.Tensor:
-        """
-        Computes the cosine similarity between a query and a list of embeddings.
-
-        Args:
-            embedding: The query vector.
-            embeddings: The list of vectors to compare against.
-
-        Returns:
-            A tensor of similarity scores.
-        """
-        return self.model.similarity(embedding, embeddings)
