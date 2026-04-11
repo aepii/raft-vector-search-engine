@@ -20,6 +20,15 @@ logger = get_logger("COORDINATOR")
 
 
 class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
+    """
+    gRPC servicer for the VectorStore service, running on the coordinator.
+
+    Encodes all text and queries via a single EmbeddingModel instance before
+    forwarding pre-computed vectors to shards. Writes are routed to a single
+    shard via a consistent hash ring; searches fan out to all registered shards
+    in parallel and the results are merged and re-ranked before returning.
+    """
+
     def __init__(self, shard_hosts: list[str]):
         self._lock = threading.RLock()
         self._ring = ConsistentHashRing(virtual_nodes=150)
@@ -152,6 +161,13 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
 
 class CoordinatorControlServicer(vector_store_pb2_grpc.CoordinatorControlServicer):
+    """
+    gRPC servicer for the CoordinatorControl service.
+
+    Handles runtime node registration and deregistration by mutating the
+    CoordinatorServicer's hash ring and stub map.
+    """
+
     def __init__(self, coordinator: CoordinatorServicer):
         self._c = coordinator
 

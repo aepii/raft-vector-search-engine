@@ -48,7 +48,7 @@ class VectorStoreClient:
         Inserts or updates a batch of items in the remote vector store.
 
         Args:
-            items: A list of item where each item has an item_id and text.
+            items: A list of (item_id, text) tuples.
 
         Returns:
             A list of status messages from the server indicating success or failure.
@@ -77,7 +77,7 @@ class VectorStoreClient:
             top_k: Number of top matching results to return.
 
         Returns:
-            A list of matching text results ranked by similarity.
+            A list of (text, score) tuples ranked by similarity score descending.
         """
         trace_id = new_trace_id("search")
         logger.info(f"[{trace_id}] [search] query='{query}' top_k={top_k}")

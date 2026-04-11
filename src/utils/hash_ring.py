@@ -20,6 +20,7 @@ class ConsistentHashRing:
         return int(hashlib.sha256(key.encode()).hexdigest(), 16)
 
     def add_node(self, host: str) -> None:
+        """Add a physical host and its virtual node positions to the ring."""
         for i in range(self._virtual_nodes):
             h = self._hash(f"{host}#vnode{i}")
             pos = bisect.bisect_left(self._points, h)
@@ -27,11 +28,17 @@ class ConsistentHashRing:
             self._ring.insert(pos, (h, host))
 
     def remove_node(self, host: str) -> None:
+        """Remove a physical host and all its virtual node positions from the ring."""
         filtered = [(h, n) for h, n in self._ring if n != host]
         self._ring = filtered
         self._points = [h for h, _ in filtered]
 
     def get_node(self, key: str) -> Optional[str]:
+        """Return the host responsible for the given key.
+
+        Hashes the key and finds the first virtual node clockwise from that
+        position. The modulo wraps around so the ring is circular.
+        """
         if not self._ring:
             return None
         h = self._hash(key)
@@ -39,7 +46,9 @@ class ConsistentHashRing:
         return self._ring[pos][1]
 
     def nodes(self) -> list[str]:
+        """Return the list of unique physical hosts registered on the ring."""
         return list({host for _, host in self._ring})
 
     def __len__(self) -> int:
+        """Return the number of unique physical hosts on the ring."""
         return len(self.nodes())
