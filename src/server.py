@@ -34,7 +34,7 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         self.service.add_item(item.id, item.text)
         logger.info(f"[{trace_id}] [Upsert] id={item.id} indexed")
 
-        return vector_store_pb2.UpsertResponse(status=f"ID {request.id} indexed.")
+        return vector_store_pb2.UpsertResponse(status=f"ID {request.item.id} indexed.")
 
     def UpsertBatch(self, request, context):
         """

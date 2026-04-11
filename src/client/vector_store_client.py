@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "localhost:50051")
+COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "localhost:50050")
 
 logger = get_logger("CLIENT")
 
@@ -68,7 +68,7 @@ class VectorStoreClient:
         logger.info(f"[{trace_id}] batch complete, {len(response.statuses)} statuses")
         return list(response.statuses)
 
-    def search(self, query: str, top_k: int = 3) -> list[str]:
+    def search(self, query: str, top_k: int = 3) -> list[tuple[str, float]]:
         """
         Performs a semantic search against the remote vector store.
 
