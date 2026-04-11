@@ -13,8 +13,9 @@ service VectorStore {
 
 // -- Upsert --
 message UpsertItem {
-  int64  id   = 1;
-  string text = 2;
+  int64          id        = 1;
+  string         text      = 2;
+  repeated float embedding = 3;  // pre-computed by coordinator; shards store directly
 }
 
 message UpsertRequest {
@@ -38,9 +39,10 @@ message UpsertBatchResponse {
 
 // -- Search --
 message SearchRequest {
-  string query_text = 1;
-  int32  top_k      = 2;
-  string trace_id   = 3;
+  string         query_text   = 1;
+  int32          top_k        = 2;
+  string         trace_id     = 3;
+  repeated float query_vector = 4;  // pre-computed by coordinator; shards use directly
 }
 
 message SearchResponse {
