@@ -65,7 +65,7 @@ class VectorStoreClient:
         )
         response = self.stub.UpsertBatch(request)
 
-        logger.info(f"[{trace_id}] batch complete, {len(response.statuses)} statuses")
+        logger.info(f"[{trace_id}] batch complete: {len(items)} items, {len(response.statuses)} acks")
         return list(response.statuses)
 
     def search(self, query: str, top_k: int = 3) -> list[tuple[str, float]]:
