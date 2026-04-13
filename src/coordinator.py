@@ -77,6 +77,10 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
 
         logger.info(f"[{trace_id}] [Upsert] id={item.id} -> {len(targets)} shards")
 
+        # Fan out synchronously (parallel via ThreadPoolExecutor, not fire-and-forget).
+        # Async replication would let a slow or failed shard go undetected, leaving it
+        # with stale data that it would serve on future searches. Sync fan-out means
+        # write latency is max(shard latencies), not sum — same model as Search.
         def write_shard(host_and_stub):
             host, stub = host_and_stub
             try:
@@ -162,6 +166,11 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
         with self._lock:
             stub_snapshot = list(self._stub_map.items())
 
+        # Always fan out to every shard, even under full replication where any one
+        # shard holds the complete dataset. Routing to a single shard would be more
+        # efficient, but if that shard is down the query fails even though all others
+        # are healthy. Fan-out + dedup preserves read fault tolerance at the cost of
+        # redundant work, which is the right tradeoff here.
         def query_shard(host_and_stub):
             host, stub = host_and_stub
             try:
