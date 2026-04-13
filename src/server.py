@@ -19,7 +19,14 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
     """gRPC servicer implementation for the VectorStore service."""
 
     def __init__(self):
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        # dirname returns "" if DB_PATH is a bare filename (e.g. DB_PATH=shard.db),
+        # in which case the empty string "" is passed to os.makedirs
+        # calling os.makedirs("") raises an error
+        # this check prevents the error
+        # probably not necessary, but safe
+        dir_name = os.path.dirname(DB_PATH)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         self.service = VectorService(VectorStore(DB_PATH))
 
     def Upsert(self, request, context):

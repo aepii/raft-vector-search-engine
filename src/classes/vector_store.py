@@ -23,6 +23,10 @@ class VectorStore:
                 in tests when using smaller synthetic vectors.
         """
         self.dim = dim
+        # The gRPC server runs a ThreadPoolExecutor, so multiple threads can call
+        # upsert/search concurrently on the same VectorStore instance. check_same_thread=False
+        # removes sqlite3's thread guard, but does not make the connection thread-safe.
+        # The lock serializes all DB access to prevent SQLITE_MISUSE errors.
         self._lock = threading.Lock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.enable_load_extension(True)
@@ -61,6 +65,7 @@ class VectorStore:
                 " upsert_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
                 (item_id, text),
             )
+            # vec0 virtual tables do not support ON CONFLICT, so upsert is DELETE + INSERT.
             self.conn.execute("DELETE FROM vec_items WHERE rowid = ?", (item_id,))
             self.conn.execute(
                 "INSERT INTO vec_items(rowid, embedding) VALUES (?, ?)",
@@ -82,6 +87,10 @@ class VectorStore:
         packed = struct.pack(f"{self.dim}f", *embedding)
         with self._lock:
             rows = self.conn.execute(
+                # The inner query does the knn search: vec_items returns the top_k nearest
+                # neighbours by cosine distance. The LIMIT must live here — vec0 requires it
+                # directly on the virtual table scan and will not accept it on an outer query.
+                # The outer query joins to items to retrieve the stored text for each result.
                 """
                 SELECT i.text, v.distance
                 FROM (
