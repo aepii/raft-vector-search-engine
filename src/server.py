@@ -1,4 +1,5 @@
 import os
+import time
 import grpc
 from concurrent import futures
 import vector_store_pb2, vector_store_pb2_grpc
@@ -51,9 +52,11 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         logger.info(f"[{trace_id}] [UpsertBatch] size={len(request.items)}")
 
         items = [(item.id, item.text, list(item.embedding)) for item in request.items]
+        t = time.perf_counter()
         self.service.add_items_batch(items)
+        elapsed = (time.perf_counter() - t) * 1000
 
-        logger.info(f"[{trace_id}] [UpsertBatch] indexed {len(items)} items")
+        logger.info(f"[{trace_id}] [UpsertBatch] indexed {len(items)} items in {elapsed:.0f}ms")
 
         statuses = [f"ID {item.id} indexed." for item in request.items]
         return vector_store_pb2.UpsertBatchResponse(statuses=statuses)

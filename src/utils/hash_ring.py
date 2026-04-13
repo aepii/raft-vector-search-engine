@@ -45,6 +45,29 @@ class ConsistentHashRing:
         pos = bisect.bisect_left(self._points, h) % len(self._points)
         return self._ring[pos][1]
 
+    def get_nodes(self, key: str, n: int) -> list[str]:
+        """Return up to n distinct physical hosts clockwise from key's hash position.
+
+        Walks the ring from the key's position, skipping virtual nodes that map
+        to a host already collected, until n unique hosts are found or the ring
+        is exhausted.
+        """
+        if not self._ring:
+            return []
+        n = min(n, len(self.nodes()))
+        h = self._hash(key)
+        start = bisect.bisect_left(self._points, h) % len(self._points)
+        seen: set[str] = set()
+        result: list[str] = []
+        for i in range(len(self._ring)):
+            host = self._ring[(start + i) % len(self._ring)][1]
+            if host not in seen:
+                seen.add(host)
+                result.append(host)
+            if len(result) == n:
+                break
+        return result
+
     def nodes(self) -> list[str]:
         """Return the list of unique physical hosts registered on the ring."""
         return list({host for _, host in self._ring})

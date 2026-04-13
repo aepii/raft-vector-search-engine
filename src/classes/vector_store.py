@@ -27,6 +27,13 @@ class VectorStore:
         # upsert/search concurrently on the same VectorStore instance. check_same_thread=False
         # removes sqlite3's thread guard, but does not make the connection thread-safe.
         # The lock serializes all DB access to prevent SQLITE_MISUSE errors.
+        #
+        # Note: WAL journal mode (PRAGMA journal_mode=WAL) is intentionally not set.
+        # WAL allows concurrent readers during a write, but only helps if the lock
+        # below is replaced with a read-write lock (shared readers, exclusive writer).
+        # Setting WAL without that change does nothing — the lock still serializes
+        # everything. The two changes are coupled; revisit together if benchmarks show
+        # lock contention under concurrent write load.
         self._lock = threading.Lock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.enable_load_extension(True)
