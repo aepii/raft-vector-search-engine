@@ -52,14 +52,6 @@ class CoordinatorServicer(vector_store_pb2_grpc.VectorStoreServicer):
         self._ring.add_node(host)
         logger.info(f"Node added: {host} (ring size={len(self._ring)})")
 
-    def _route(self, item_id: int) -> tuple[str, vector_store_pb2_grpc.VectorStoreStub]:
-        """Map an item ID to a single (host, stub) pair. Kept for future N<total use."""
-        with self._lock:
-            host = self._ring.get_node(str(item_id))
-            if host is None:
-                raise RuntimeError("No shard nodes in ring")
-            return host, self._stub_map[host]
-
     def _replication_targets(self, key: str) -> list[tuple[str, vector_store_pb2_grpc.VectorStoreStub]]:
         """Return the (host, stub) pairs that should store the given key.
 
