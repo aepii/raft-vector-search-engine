@@ -1,6 +1,6 @@
 import sqlite3
 import struct
-from typing import Optional
+import threading
 
 import sqlite_vec
 
@@ -23,6 +23,7 @@ class VectorStore:
                 in tests when using smaller synthetic vectors.
         """
         self.dim = dim
+        self._lock = threading.Lock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.enable_load_extension(True)
         sqlite_vec.load(self.conn)
@@ -53,7 +54,7 @@ class VectorStore:
             embedding: The numerical representation of the text as a list of floats.
         """
         packed = struct.pack(f"{self.dim}f", *embedding)
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "INSERT INTO items(id, text) VALUES (?, ?)"
                 " ON CONFLICT(id) DO UPDATE SET text=excluded.text,"
@@ -79,23 +80,25 @@ class VectorStore:
             (1.0 = identical).
         """
         packed = struct.pack(f"{self.dim}f", *embedding)
-        rows = self.conn.execute(
-            """
-            SELECT i.text, v.distance
-            FROM (
-                SELECT rowid, distance
-                FROM vec_items
-                WHERE embedding MATCH ?
-                LIMIT ?
-            ) v
-            JOIN items i ON i.id = v.rowid
-            ORDER BY v.distance
-            """,
-            (packed, top_k),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT i.text, v.distance
+                FROM (
+                    SELECT rowid, distance
+                    FROM vec_items
+                    WHERE embedding MATCH ?
+                    LIMIT ?
+                ) v
+                JOIN items i ON i.id = v.rowid
+                ORDER BY v.distance
+                """,
+                (packed, top_k),
+            ).fetchall()
         return [(text, 1.0 - distance) for text, distance in rows]
 
     def count(self) -> int:
         """Returns the number of items currently stored."""
-        row = self.conn.execute("SELECT COUNT(*) FROM items").fetchone()
+        with self._lock:
+            row = self.conn.execute("SELECT COUNT(*) FROM items").fetchone()
         return row[0]
