@@ -90,7 +90,8 @@ python -m coordinator
 
 ### 3. Start Server Nodes (Shards)
 
-Run one server per terminal:
+Run one server per terminal. Each shard writes its vector DB to `data/shard_{PORT}.db`
+by default — the directory is created automatically on first startup.
 
 ```bash
 $env:SERVER_PORT=50051; python -m server
@@ -103,6 +104,8 @@ $env:SERVER_PORT=50052; python -m server
 ```bash
 $env:SERVER_PORT=50053; python -m server
 ```
+
+Override the DB location with `DB_PATH` if needed (e.g. `$env:DB_PATH="/data/shard.db"`).
 
 ### 4. Run Benchmark (after all services are ready)
 
