@@ -25,7 +25,12 @@ logger = get_logger(f"SHARD:{SERVER_PORT}")
 
 
 class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
-    """gRPC servicer implementation for the VectorStore service."""
+    """gRPC servicer for the VectorStore service, running on shards only.
+
+    Stores pre-computed embeddings received from the coordinator. Also implements
+    Dump for state transfer: a recovering shard can stream a slice of this shard's
+    dataset to seed its own DB before joining the routing table.
+    """
 
     def __init__(self):
         # dirname returns "" if DB_PATH is a bare filename (e.g. DB_PATH=shard.db),
@@ -98,6 +103,10 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         start_hash is inclusive; end_hash is exclusive. An empty end_hash means no
         upper bound (the final arc of the ring). Arc bounds are SHA-256 hex strings
         of str(item_id), which are always 64 chars and thus lexicographically ordered.
+
+        The key hash matches the ring's write routing key (SHA-256 of str(item_id)),
+        so arc boundaries aren't arbitrary — under partial replication they correspond
+        to actual ownership ranges on the ring.
         """
         start_hash = request.start_hash
         end_hash = request.end_hash
@@ -140,9 +149,15 @@ def _state_transfer(servicer: VectorStoreServicer) -> None:
     completion before the heartbeat loop starts so the shard never enters
     the routing table with stale or empty data.
 
-    A warning is logged and transfer is skipped on any coordinator or donor
-    failure — the shard still starts, but may serve incomplete results until
-    incoming writes catch it up.
+    Known limitations:
+    - GetPeers is attempted once with a 10s timeout. If the coordinator is not
+      yet up (e.g. Docker startup race), transfer is skipped entirely and the
+      shard starts empty. No retry.
+    - Individual Dump streams have no timeout. A stalled donor blocks that
+      ThreadPoolExecutor worker — and therefore startup — indefinitely.
+    - Writes that arrive on other shards during the dump are not captured.
+      The gap is bounded by dump duration; the coordinator logs a warning on
+      re-registration to flag this.
     """
     ctrl_channel = grpc.insecure_channel(COORDINATOR_HOST)
     ctrl_stub = vector_store_pb2_grpc.CoordinatorControlStub(ctrl_channel)
