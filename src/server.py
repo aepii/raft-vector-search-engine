@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 import grpc
 from concurrent import futures
 import vector_store_pb2, vector_store_pb2_grpc
@@ -12,6 +13,11 @@ load_dotenv()
 
 SERVER_PORT = os.getenv("SERVER_PORT", "50051")
 DB_PATH = os.getenv("DB_PATH", f"./data/shard_{SERVER_PORT}.db")
+COORDINATOR_HOST = os.getenv("COORDINATOR_HOST", "localhost:50050")
+# Advertised address sent in heartbeats. Override in Docker/Chameleon where
+# the container's hostname differs from localhost.
+SHARD_HOST = os.getenv("SHARD_HOST", f"localhost:{SERVER_PORT}")
+HEARTBEAT_INTERVAL_S = int(os.getenv("HEARTBEAT_INTERVAL_S", "5"))
 
 logger = get_logger(f"SHARD:{SERVER_PORT}")
 
@@ -85,6 +91,18 @@ class VectorStoreServicer(vector_store_pb2_grpc.VectorStoreServicer):
         )
 
 
+def _heartbeat_loop():
+    channel = grpc.insecure_channel(COORDINATOR_HOST)
+    stub = vector_store_pb2_grpc.CoordinatorControlStub(channel)
+    request = vector_store_pb2.HeartbeatRequest(host=SHARD_HOST)
+    while True:
+        try:
+            stub.Heartbeat(request)
+        except grpc.RpcError as e:
+            logger.warning(f"Heartbeat to {COORDINATOR_HOST} failed: {e.details()}")
+        time.sleep(HEARTBEAT_INTERVAL_S)
+
+
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     vector_store_pb2_grpc.add_VectorStoreServicer_to_server(
@@ -93,6 +111,11 @@ def serve():
     server.add_insecure_port(f"[::]:{SERVER_PORT}")
     logger.info(f"Shard started on port {SERVER_PORT}")
     server.start()
+
+    t = threading.Thread(target=_heartbeat_loop, daemon=True)
+    t.start()
+    logger.info(f"Heartbeat thread started -> {COORDINATOR_HOST} as {SHARD_HOST}")
+
     server.wait_for_termination()
 
 
