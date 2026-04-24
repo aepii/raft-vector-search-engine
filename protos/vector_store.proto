@@ -9,6 +9,9 @@ service VectorStore {
   rpc Search(SearchRequest) returns (SearchResponse);
     // Returns the number of items stored on this node
   rpc Count(CountRequest) returns (CountResponse);
+    // Streams all locally stored items whose key hash falls in [start_hash, end_hash).
+    // Used by recovering shards during state transfer. Coordinator does not implement this.
+  rpc Dump(DumpRequest) returns (stream DumpItem);
 }
 
 // -- Upsert --
@@ -63,6 +66,7 @@ service CoordinatorControl {
   rpc RegisterNode(NodeRequest) returns (NodeResponse);
   rpc DeregisterNode(NodeRequest) returns (NodeResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc GetPeers(GetPeersRequest) returns (GetPeersResponse);
 }
 
 // -- Heartbeat --
@@ -82,4 +86,31 @@ message NodeResponse {
   bool   success    = 1;
   string message    = 2;
   int32  node_count = 3;
+}
+
+// -- Dump --
+message DumpRequest {
+  string start_hash = 1;  // inclusive lower bound (SHA-256 hex of str(id))
+  string end_hash   = 2;  // exclusive upper bound; empty string means no upper bound
+}
+
+message DumpItem {
+  int64          id        = 1;
+  string         text      = 2;
+  repeated float embedding = 3;
+}
+
+// -- GetPeers --
+message GetPeersRequest {
+  string host = 1;  // calling shard's own host, excluded from the response
+}
+
+message PeerAssignment {
+  string host       = 1;
+  string start_hash = 2;
+  string end_hash   = 3;
+}
+
+message GetPeersResponse {
+  repeated PeerAssignment peers = 1;
 }

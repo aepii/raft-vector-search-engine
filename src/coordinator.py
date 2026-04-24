@@ -241,10 +241,10 @@ class CoordinatorControlServicer(vector_store_pb2_grpc.CoordinatorControlService
     """
     gRPC servicer for the CoordinatorControl service.
 
-    Handles heartbeats, runtime node registration, and deregistration by mutating
-    the CoordinatorServicer's hash ring and stub map. Under normal operation shards
-    register implicitly via their first Heartbeat — RegisterNode is retained for
-    manual bootstrapping only.
+    Handles heartbeats, runtime node registration, deregistration, and peer
+    discovery for state transfer by mutating the CoordinatorServicer's hash ring
+    and stub map. Under normal operation shards register implicitly via their first
+    Heartbeat — RegisterNode is retained for manual bootstrapping only.
     """
 
     def __init__(self, coordinator: CoordinatorServicer):
@@ -275,13 +275,25 @@ class CoordinatorControlServicer(vector_store_pb2_grpc.CoordinatorControlService
             return vector_store_pb2.HeartbeatResponse(registered=False)
 
         with self._c._lock:
+            # Check previously_seen before updating _last_seen — after the update
+            # the host is always present, so we'd lose the ability to distinguish
+            # a fresh registration from a re-registration after an absence.
+            previously_seen = host in self._c._last_seen
             self._c._last_seen[host] = time.time()
             was_registered = host in self._c._stub_map
             if not was_registered:
-                # Handles both initial registration and re-registration after
-                # the sweep has deregistered a shard that was temporarily unreachable.
                 self._c._add_node_locked(host)
-                logger.info(f"[Heartbeat] {host} registered via heartbeat (total nodes: {len(self._c._stub_map)})")
+                if previously_seen:
+                    # Shard was known before and is re-registering after the sweep
+                    # deregistered it. State transfer runs before the heartbeat loop,
+                    # so the shard's DB should be seeded — but any writes that arrived
+                    # during the dump window are missing until incoming writes catch it up.
+                    logger.warning(
+                        f"[Heartbeat] {host} re-registered after absence — may be missing "
+                        f"writes from state transfer window (total nodes: {len(self._c._stub_map)})"
+                    )
+                else:
+                    logger.info(f"[Heartbeat] {host} registered via heartbeat (total nodes: {len(self._c._stub_map)})")
 
         return vector_store_pb2.HeartbeatResponse(registered=True)
 
@@ -307,6 +319,36 @@ class CoordinatorControlServicer(vector_store_pb2_grpc.CoordinatorControlService
         return vector_store_pb2.NodeResponse(
             success=True, message=f"{host} removed", node_count=count
         )
+
+    def GetPeers(self, request, context):
+        """Returns registered shards with evenly divided ring arc assignments.
+
+        The calling shard passes its own host so it can be excluded. The SHA-256
+        hash space [0, 2^256) is split into equal arcs, one per donor, for
+        parallel state transfer. Under full replication every donor holds every
+        key, so arc assignment is load distribution only — any healthy shard can
+        provide any arc.
+        """
+        exclude = request.host.strip()
+        with self._c._lock:
+            donors = [h for h in self._c._stub_map if h != exclude]
+
+        if not donors:
+            return vector_store_pb2.GetPeersResponse(peers=[])
+
+        space = 2 ** 256
+        n = len(donors)
+        arc_size = space // n
+        assignments = []
+        for i, host in enumerate(donors):
+            start = format(i * arc_size, "064x")
+            end = format((i + 1) * arc_size, "064x") if i < n - 1 else ""
+            assignments.append(
+                vector_store_pb2.PeerAssignment(host=host, start_hash=start, end_hash=end)
+            )
+
+        logger.info(f"[GetPeers] returning {len(assignments)} donors to {exclude or '(unspecified)'}")
+        return vector_store_pb2.GetPeersResponse(peers=assignments)
 
 
 def serve():
