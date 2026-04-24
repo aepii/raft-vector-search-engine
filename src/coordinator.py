@@ -308,6 +308,36 @@ class CoordinatorControlServicer(vector_store_pb2_grpc.CoordinatorControlService
             success=True, message=f"{host} removed", node_count=count
         )
 
+    def GetPeers(self, request, context):
+        """Returns registered shards with evenly divided ring arc assignments.
+
+        The calling shard passes its own host so it can be excluded. The SHA-256
+        hash space [0, 2^256) is split into equal arcs, one per donor, for
+        parallel state transfer. Under full replication every donor holds every
+        key, so arc assignment is load distribution only — any healthy shard can
+        provide any arc.
+        """
+        exclude = request.host.strip()
+        with self._c._lock:
+            donors = [h for h in self._c._stub_map if h != exclude]
+
+        if not donors:
+            return vector_store_pb2.GetPeersResponse(peers=[])
+
+        space = 2 ** 256
+        n = len(donors)
+        arc_size = space // n
+        assignments = []
+        for i, host in enumerate(donors):
+            start = format(i * arc_size, "064x")
+            end = format((i + 1) * arc_size, "064x") if i < n - 1 else ""
+            assignments.append(
+                vector_store_pb2.PeerAssignment(host=host, start_hash=start, end_hash=end)
+            )
+
+        logger.info(f"[GetPeers] returning {len(assignments)} donors to {exclude or '(unspecified)'}")
+        return vector_store_pb2.GetPeersResponse(peers=assignments)
+
 
 def serve():
     coordinator = CoordinatorServicer(SHARD_HOSTS, replication_factor=REPLICATION_FACTOR)
