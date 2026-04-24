@@ -16,6 +16,8 @@ Writes (`Upsert`, `UpsertBatch`) are routed via a consistent hash ring (SHA-256,
 
 Shards self-register by sending periodic heartbeats to the coordinator. The coordinator tracks liveness via a background sweep and automatically removes shards that stop responding. Startup order does not matter — shards can come up before or after the coordinator and will register on their first successful heartbeat.
 
+When a shard restarts, it seeds itself from healthy peers before registering — a recovering shard never enters the routing table with a stale or empty database. On startup the shard calls `GetPeers` on the coordinator, which divides the SHA-256 hash space into equal arcs and assigns one arc per donor. The shard opens parallel `Dump` streams to each donor, pulls its slice of the dataset, and writes items into its local DB; only after all streams complete does the heartbeat loop start. Set `SKIP_STATE_TRANSFER=true` to bypass this for local dev.
+
 The coordinator also exposes a `CoordinatorControl` service on port 50050 for manual registration and deregistration if needed:
 
 ```bash
@@ -23,6 +25,12 @@ The coordinator also exposes a `CoordinatorControl` service on port 50050 for ma
 RegisterNode   { host: "localhost:50054" }
 DeregisterNode { host: "localhost:50054" }
 ```
+
+## Operational constraints
+
+- **State transfer window.** Writes arriving on other shards *during* a dump are missed by the recovering shard. The gap is bounded by dump duration; the coordinator logs a warning on re-registration. This is acceptable for the current scale but the write-buffer approach is the natural follow-on.
+- **Permanent node loss under partial replication.** Ring positions are derived from the host string. Under the current default (full replication, N = total nodes) any replacement hostname works — state transfer fills it completely. Under partial replication (N < total nodes), a replacement must reuse the dead node's hostname to land in the same ring positions and restore full N-way replication. A different hostname occupies different positions, leaving some keys underreplicated until a redistribution pass is run. No redistribution mechanism is currently implemented.
+- **Coordinator is a single point of failure.** If the coordinator crashes, the system stops routing. Raft consensus across coordinator replicas is the correct fix; see the project roadmap.
 
 ## Setup and Installation
 
