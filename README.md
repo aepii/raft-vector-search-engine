@@ -64,12 +64,10 @@ pip install -r requirements.txt
 
 ### 4. Compile the Protobuf Definitions
 
+The compiled stubs are committed to the repo, so this step is only needed if you change `protos/vector_store.proto`:
+
 ```bash
-python -m grpc_tools.protoc \
-    -I protos \
-    --python_out=src \
-    --grpc_python_out=src \
-    protos/vector_store.proto
+bash scripts/generate_protos.sh
 ```
 
 ### 5. Configure Environment
