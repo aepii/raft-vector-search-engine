@@ -62,9 +62,14 @@ All subsequent commands assume the virtual environment is active.
 pip install -r requirements.txt
 ```
 
-### 4. Compile the Protobuf Definitions
+### 4. Install the pre-commit hook
 
-The compiled stubs are committed to the repo, so this step is only needed if you change `protos/vector_store.proto`:
+```bash
+ln -s ../../scripts/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+This blocks commits where `protos/vector_store.proto` and the compiled stubs are out of sync. If the proto changes, regenerate with:
 
 ```bash
 bash scripts/generate_protos.sh

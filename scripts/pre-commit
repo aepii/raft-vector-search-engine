@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pre-commit hook: fail if proto stubs are out of sync with vector_store.proto.
+# Install once per clone: ln -s ../../scripts/pre-commit .git/hooks/pre-commit
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+PROTO_FILE="protos/vector_store.proto"
+CHANGED=$(git diff --cached --name-only)
+
+# Only run the check if the proto or the stubs themselves are staged.
+if ! echo "$CHANGED" | grep -qE "(vector_store\.proto|vector_store_pb2)"; then
+    exit 0
+fi
+
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
+python -m grpc_tools.protoc \
+    -I protos \
+    --python_out="$TMPDIR" \
+    --grpc_python_out="$TMPDIR" \
+    "$PROTO_FILE"
+
+STALE=0
+for f in vector_store_pb2.py vector_store_pb2_grpc.py; do
+    if ! diff -q "$TMPDIR/$f" "src/$f" > /dev/null 2>&1; then
+        echo "ERROR: src/$f is out of sync with $PROTO_FILE"
+        STALE=1
+    fi
+done
+
+if [ $STALE -ne 0 ]; then
+    echo "Run 'bash scripts/generate_protos.sh' and stage the updated stubs before committing."
+    exit 1
+fi
