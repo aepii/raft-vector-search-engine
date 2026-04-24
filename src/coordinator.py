@@ -11,9 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SHARD_HOSTS = os.getenv(
-    "SHARD_HOSTS", "localhost:50051,localhost:50052,localhost:50053"
-).split(",")
+SHARD_HOSTS = os.getenv("SHARD_HOSTS", "").split(",")
 COORDINATOR_PORT = os.getenv("COORDINATOR_PORT", "50050")
 # Number of shards that store each item. 0 means all registered nodes (full replication).
 REPLICATION_FACTOR = int(os.getenv("REPLICATION_FACTOR", "0"))
