@@ -3,7 +3,7 @@
 # Replace COORDINATOR_IP with this node's external Chameleon IP.
 set -euo pipefail
 
-COORDINATOR_IP="<COORDINATOR_IP>"
+# COORDINATOR_IP="<COORDINATOR_IP>" # not needed unless/until we do raft
 
 docker run -d \
     --name coordinator \
