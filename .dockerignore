@@ -1,0 +1,9 @@
+.venv/
+.git/
+scratch/
+**/__pycache__/
+**/*.pyc
+**/*.db
+**/*.log
+.env
+.pytest_cache/

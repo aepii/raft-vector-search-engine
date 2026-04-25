@@ -2,11 +2,6 @@
 venv/
 .venv/
 
-# Generated protobuf files (compiled from protos/vector_store.proto)
-src/vector_store_pb2.py
-src/vector_store_pb2_grpc.py
-src/vector_store_pb2.pyi
-
 # Python cache
 __pycache__/
 *.pyc
