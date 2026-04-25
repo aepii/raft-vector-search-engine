@@ -54,7 +54,7 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-All subsequent commands assume the virtual environment is active.
+**All subsequent commands assume the virtual environment is active**.
 
 ### 3.  Install Dependencies
 
@@ -63,6 +63,8 @@ pip install -r requirements.txt
 ```
 
 ### 4. Install the pre-commit hook
+
+`.git` is not tracked by git, so you have to run the following for the hook to be active in your dev environment.
 
 ```bash
 ln -s ../../scripts/pre-commit .git/hooks/pre-commit
@@ -75,6 +77,8 @@ This blocks commits where `protos/vector_store.proto` and the compiled stubs are
 bash scripts/generate_protos.sh
 ```
 
+The detection/blocking hook is automatic, but *regeneration is still manual*.
+
 ### 5. Configure Environment
 
 Copy `.env.example` to `.env`:
@@ -83,43 +87,73 @@ Copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
+*Currently* there are no secrets in here, but `.env` is still `.gitignore`d. We don't anticipate needing any secrets here.
+
 ## Running Locally
 
-Start each component in separate terminals.
+### With Docker Compose (recommended)
 
-### 1. Navigate to the source directory
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux). Make sure it's running first, Otherwise you'll get an `unable to get image` error.
+
+```bash
+docker compose up --build
+```
+
+This starts the coordinator and three shards on a shared bridge network with named volumes for shard persistence. The coordinator image is large (~1.7 GB) due to the embedded ML model; the first build takes several minutes.
+
+To run the benchmark against the running cluster:
+
+```bash
+docker compose run --rm coordinator python -m benchmarks.benchmark
+```
+
+To stop and remove containers (volumes are preserved):
+
+```bash
+docker compose down
+```
+
+To also wipe shard data:
+
+```bash
+docker compose down -v
+```
+
+### Without Docker (bare processes)
+
+Start each component in separate terminals from within `src/`.
 
 ```bash
 cd src
 ```
 
-### 2. Start the Coordinator
-
 ```bash
 python -m coordinator
 ```
 
-### 3. Start Server Nodes (Shards)
-
-Run one server per terminal. Each shard writes its vector DB to `data/shard_{PORT}.db`
-by default — the directory is created automatically on first startup.
-
 ```bash
 $env:SERVER_PORT=50051; python -m server
-```
-
-```bash
 $env:SERVER_PORT=50052; python -m server
-```
-
-```bash
 $env:SERVER_PORT=50053; python -m server
 ```
-
-Override the DB location with `DB_PATH` if needed (e.g. `$env:DB_PATH="/data/shard.db"`).
-
-### 4. Run Benchmark (after all services are ready)
 
 ```bash
 python -m benchmarks.benchmark
 ```
+
+## Deploying on Chameleon Cloud
+
+> These instructions are a starting point. Once we establish our actual Chameleon workflow we can update this.
+
+Deployment scripts are in `deploy/chameleon/`. The expected node layout is one VM per role:
+
+| Node | Role | Script |
+| ---- | ---- | ------ |
+| node-0 | Coordinator | `start-coordinator.sh` |
+| node-1 | Shard 0 | `start-shard.sh` |
+| node-2 | Shard 1 | `start-shard.sh` |
+| node-3 | Shard 2 | `start-shard.sh` |
+
+See [`deploy/chameleon/README.md`](deploy/chameleon/README.md) for more detail.
+
+Docker images are published to GHCR automatically on every push to `main` via GitHub Actions. Each node pulls its image directly without having to build it itself.
