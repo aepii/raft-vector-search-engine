@@ -7,7 +7,7 @@ services:
       - "50050:50050"
     environment:
       COORDINATOR_PORT: "50050"
-      REPLICATION_FACTOR: "0"
+      REPLICATION_FACTOR: "3"
     networks:
       - vector-net
 
@@ -15,6 +15,8 @@ services:
     build:
       context: .
       dockerfile: docker/shard/Dockerfile
+    ports:
+      - "50051:50051"
     environment:
       SERVER_PORT: "50051"
       COORDINATOR_HOST: "coordinator:50050"
@@ -29,6 +31,8 @@ services:
     build:
       context: .
       dockerfile: docker/shard/Dockerfile
+    ports:
+      - "50052:50051"
     environment:
       SERVER_PORT: "50051"
       COORDINATOR_HOST: "coordinator:50050"
@@ -43,6 +47,8 @@ services:
     build:
       context: .
       dockerfile: docker/shard/Dockerfile
+    ports:
+      - "50053:50051"
     environment:
       SERVER_PORT: "50051"
       COORDINATOR_HOST: "coordinator:50050"
@@ -53,10 +59,44 @@ services:
     networks:
       - vector-net
 
+  shard-3:
+    build:
+      context: .
+      dockerfile: docker/shard/Dockerfile
+    ports:
+      - "50054:50051"
+    environment:
+      SERVER_PORT: "50051"
+      COORDINATOR_HOST: "coordinator:50050"
+      SHARD_HOST: "shard-3:50051"
+      DB_PATH: "/data/shard.db"
+    volumes:
+      - shard-3-data:/data
+    networks:
+      - vector-net
+
+  shard-4:
+    build:
+      context: .
+      dockerfile: docker/shard/Dockerfile
+    ports:
+      - "50055:50051"
+    environment:
+      SERVER_PORT: "50051"
+      COORDINATOR_HOST: "coordinator:50050"
+      SHARD_HOST: "shard-4:50051"
+      DB_PATH: "/data/shard.db"
+    volumes:
+      - shard-4-data:/data
+    networks:
+      - vector-net
+
 volumes:
   shard-0-data:
   shard-1-data:
   shard-2-data:
+  shard-3-data:
+  shard-4-data:
 
 networks:
   vector-net:

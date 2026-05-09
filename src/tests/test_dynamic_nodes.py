@@ -15,8 +15,8 @@ import vector_store_pb2_grpc
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("compose_cluster")]
 
 COORDINATOR = "localhost:50050"
-EXTRA_HOST = "localhost:50054"
-INITIAL_NODE_COUNT = 3
+EXTRA_HOST = "localhost:59998"
+INITIAL_NODE_COUNT = 5
 
 
 @pytest.fixture(scope="module")

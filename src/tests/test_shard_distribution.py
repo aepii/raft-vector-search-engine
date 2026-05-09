@@ -15,11 +15,11 @@ import vector_store_pb2_grpc
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("compose_cluster")]
 
 COORDINATOR = "localhost:50050"
-SHARD_HOSTS = ["localhost:50051", "localhost:50052", "localhost:50053"]
-# With full replication every shard holds 1/N of the total-across-shards.
-# 3 shards → each holds 33.3%; allow ±10% for any future partial-replication config.
-MIN_FRACTION = 0.23
-MAX_FRACTION = 0.43
+SHARD_HOSTS = ["localhost:50051", "localhost:50052", "localhost:50053", "localhost:50054", "localhost:50055"]
+# With RF=3 and 5 shards each item lands on 3 shards, so total copies = items * 3.
+# Each shard's share of that total is ~20%; allow ±8% for hash ring skew.
+MIN_FRACTION = 0.12
+MAX_FRACTION = 0.28
 SEED_IDS_START = 9000
 SEED_COUNT = 60
 
