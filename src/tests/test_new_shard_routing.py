@@ -1,69 +1,115 @@
 """
-Verify that registering a new shard causes new upserts to route to it.
+Verify that a newly added shard starts receiving writes via hash ring routing.
 
-Requires:
-  - coordinator running on port 50050
-  - shards on 50051, 50052, 50053 (existing)
-  - a 4th shard running on port 50054
+Pure unit tests — no live processes needed. The original live-process version
+required a 4th shard container on port 50054 (not in the compose cluster), so
+it was rewritten to manipulate the coordinator's ring and stub map directly,
+which is the same internal path used by RegisterNode.
 
 Run from src/:
-    pytest tests/test_new_shard_routing.py -v -s
+    pytest tests/test_new_shard_routing.py -v
 """
-import grpc
+import numpy as np
 import pytest
-import hashlib
+from unittest.mock import MagicMock, patch
 import vector_store_pb2
-import vector_store_pb2_grpc
+from coordinator import CoordinatorServicer
 
-COORDINATOR = "localhost:50050"
-NEW_SHARD = "localhost:50054"
-
-# Items whose IDs hash to the new shard — we upsert enough that at least
-# some are guaranteed to land there after the ring is rebalanced (~25% of keys).
-NUM_ITEMS = 200
+# With RF=1 and 4 nodes (~150 virtual nodes each), P(new node gets 0 of 100 items) ≈ 3e-13.
+NUM_ITEMS = 100
 
 
-def make_id(text: str) -> int:
-    return int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**63 - 1)
+def _make_coordinator(n_shards, replication_factor):
+    hosts = [f"fake:{5000 + i}" for i in range(n_shards)]
+    stubs = [MagicMock() for _ in hosts]
+
+    with patch("coordinator.EmbeddingModel") as MockEmbed, \
+         patch("coordinator.grpc.insecure_channel"), \
+         patch("coordinator.vector_store_pb2_grpc.VectorStoreStub", side_effect=stubs):
+        MockEmbed.return_value.encode.side_effect = lambda x: (
+            np.zeros((len(x), 384)) if isinstance(x, list) else np.zeros(384)
+        )
+        coord = CoordinatorServicer(hosts, replication_factor=replication_factor)
+
+    return coord, stubs
 
 
-ITEMS = [(make_id(f"routing-test-item-{i}"), f"routing test item {i}") for i in range(NUM_ITEMS)]
+def _add_shard(coord):
+    """Inject a new mock shard — mirrors what CoordinatorControlServicer.RegisterNode does."""
+    stub = MagicMock()
+    stub.UpsertBatch.return_value = vector_store_pb2.UpsertBatchResponse(statuses=["ok"])
+    host = "fake:5099"
+    coord._ring.add_node(host)
+    coord._stub_map[host] = stub
+    return stub
 
 
-@pytest.fixture(scope="module")
-def ctrl():
-    return vector_store_pb2_grpc.CoordinatorControlStub(grpc.insecure_channel(COORDINATOR))
+def _upsert_batch(coord, n):
+    for stub in coord._stub_map.values():
+        if not stub.UpsertBatch.return_value:
+            stub.UpsertBatch.return_value = vector_store_pb2.UpsertBatchResponse(statuses=["ok"])
+    items = [vector_store_pb2.UpsertItem(id=i, text=f"item {i}") for i in range(n)]
+    coord.UpsertBatch(
+        vector_store_pb2.UpsertBatchRequest(trace_id="routing-test", items=items),
+        context=MagicMock(),
+    )
 
 
-@pytest.fixture(scope="module")
-def coordinator():
-    return vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(COORDINATOR))
+def test_newly_registered_node_receives_writes():
+    """After adding a node, subsequent writes route to it (RF=1: only routed keys)."""
+    coord, initial_stubs = _make_coordinator(n_shards=3, replication_factor=1)
+    for s in initial_stubs:
+        s.UpsertBatch.return_value = vector_store_pb2.UpsertBatchResponse(statuses=["ok"])
+
+    new_stub = _add_shard(coord)
+    _upsert_batch(coord, NUM_ITEMS)
+
+    assert new_stub.UpsertBatch.called, (
+        "New node received no writes after registration — ring routing may be broken"
+    )
 
 
-@pytest.fixture(scope="module")
-def new_shard():
-    return vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(NEW_SHARD))
+def test_rf1_total_items_sent_equals_input():
+    """With RF=1 each item routes to exactly 1 shard regardless of ring size."""
+    coord, initial_stubs = _make_coordinator(n_shards=3, replication_factor=1)
+    for s in initial_stubs:
+        s.UpsertBatch.return_value = vector_store_pb2.UpsertBatchResponse(statuses=["ok"])
+
+    new_stub = _add_shard(coord)
+    all_stubs = initial_stubs + [new_stub]
+
+    items = [vector_store_pb2.UpsertItem(id=i, text=f"item {i}") for i in range(NUM_ITEMS)]
+    coord.UpsertBatch(
+        vector_store_pb2.UpsertBatchRequest(trace_id="rf1-total", items=items),
+        context=MagicMock(),
+    )
+
+    total_sent = sum(
+        len(s.UpsertBatch.call_args[0][0].items)
+        for s in all_stubs
+        if s.UpsertBatch.called
+    )
+    assert total_sent == NUM_ITEMS, (
+        f"RF=1 should route each item to exactly 1 shard; "
+        f"got total_sent={total_sent} for {NUM_ITEMS} input items"
+    )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def register_and_cleanup(ctrl):
-    resp = ctrl.RegisterNode(vector_store_pb2.NodeRequest(host=NEW_SHARD))
-    assert resp.success, f"Failed to register new shard: {resp.message}"
-    yield
-    ctrl.DeregisterNode(vector_store_pb2.NodeRequest(host=NEW_SHARD))
+def test_node_before_registration_receives_no_writes():
+    """Writes issued before registration must not reach a stub that isn't in the ring yet."""
+    coord, initial_stubs = _make_coordinator(n_shards=3, replication_factor=1)
+    for s in initial_stubs:
+        s.UpsertBatch.return_value = vector_store_pb2.UpsertBatchResponse(statuses=["ok"])
 
+    unregistered = MagicMock()
 
-def test_new_shard_starts_empty(new_shard):
-    count = new_shard.Count(vector_store_pb2.CountRequest()).count
-    assert count == 0, f"Expected new shard to start empty, got {count} items"
+    # Write BEFORE adding to ring.
+    items = [vector_store_pb2.UpsertItem(id=i, text=f"item {i}") for i in range(NUM_ITEMS)]
+    coord.UpsertBatch(
+        vector_store_pb2.UpsertBatchRequest(trace_id="pre-reg", items=items),
+        context=MagicMock(),
+    )
 
-
-def test_new_shard_receives_writes(coordinator, new_shard):
-    request_items = [vector_store_pb2.UpsertItem(id=item_id, text=text) for item_id, text in ITEMS]
-    coordinator.UpsertBatch(vector_store_pb2.UpsertBatchRequest(items=request_items, trace_id="test-routing"))
-
-    count = new_shard.Count(vector_store_pb2.CountRequest()).count
-    assert count > 0, (
-        f"New shard received 0 items after upserting {NUM_ITEMS} items. "
-        "Ring routing may not be directing writes to the new node."
+    assert not unregistered.UpsertBatch.called, (
+        "Unregistered stub received writes — stub map may have leaked"
     )

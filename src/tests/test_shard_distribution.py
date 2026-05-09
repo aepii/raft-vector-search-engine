@@ -1,29 +1,50 @@
 """
 Shard distribution check.
 
-Requires all three shards to be running and seeded (e.g. after a benchmark run).
+Requires the docker compose cluster to be running and responsive.
+Run: docker compose up -d, then pytest -m integration
+
 Run from src/:
-    pytest tests/test_shard_distribution.py -s
+    pytest tests/test_shard_distribution.py -v
 """
 import grpc
 import pytest
 import vector_store_pb2
 import vector_store_pb2_grpc
 
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("compose_cluster")]
+
+COORDINATOR = "localhost:50050"
 SHARD_HOSTS = ["localhost:50051", "localhost:50052", "localhost:50053"]
-# With 150 virtual nodes and 3 shards the distribution should be ~33% each.
-# Allow ±10% of total (i.e. 23%–43%) to avoid flakiness.
+# With full replication every shard holds 1/N of the total-across-shards.
+# 3 shards → each holds 33.3%; allow ±10% for any future partial-replication config.
 MIN_FRACTION = 0.23
 MAX_FRACTION = 0.43
+SEED_IDS_START = 9000
+SEED_COUNT = 60
+
+
+@pytest.fixture(scope="module", autouse=True)
+def seed_data(compose_cluster):
+    """Upsert a small fixed dataset so shards have items before distribution checks."""
+    ch = grpc.insecure_channel(COORDINATOR)
+    stub = vector_store_pb2_grpc.VectorStoreStub(ch)
+    items = [
+        vector_store_pb2.UpsertItem(id=SEED_IDS_START + i, text=f"distribution seed item {i}")
+        for i in range(SEED_COUNT)
+    ]
+    stub.UpsertBatch(
+        vector_store_pb2.UpsertBatchRequest(items=items, trace_id="dist-seed")
+    )
+    ch.close()
 
 
 @pytest.fixture(scope="module")
-def shard_counts():
+def shard_counts(seed_data):
     counts = {}
     for host in SHARD_HOSTS:
         stub = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(host))
-        resp = stub.Count(vector_store_pb2.CountRequest())
-        counts[host] = resp.count
+        counts[host] = stub.Count(vector_store_pb2.CountRequest()).count
     return counts
 
 

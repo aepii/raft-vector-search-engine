@@ -1,9 +1,5 @@
 """
-State transfer tests — three tiers.
-
-NOTE: These tests will need revision after containerization. The live-process
-tiers assume bare local processes on fixed ports; containers will change
-addresses and startup orchestration.
+State transfer tests — two tiers.
 
 ────────────────────────────────────────────────────────────────
 TIER 1 — Unit tests (no running processes required)
@@ -11,37 +7,27 @@ TIER 1 — Unit tests (no running processes required)
     pytest tests/test_state_transfer.py -v -k "unit"
 
 ────────────────────────────────────────────────────────────────
-TIER 2 — Integration tests (coordinator + 3 shards must be running)
+TIER 2 — Integration tests (docker compose cluster required)
 ────────────────────────────────────────────────────────────────
-Start before running:
-    cd src/
-    python -m coordinator                      # terminal 1
-    SERVER_PORT=50051 python -m server         # terminal 2
-    SERVER_PORT=50052 python -m server         # terminal 3
-    SERVER_PORT=50053 python -m server         # terminal 4
+    docker compose up -d
+    pytest tests/test_state_transfer.py -v -m integration
 
-    pytest tests/test_state_transfer.py -v -k "integration"
+TIER 2 includes a shard-restart test (pytest.mark.slow) that takes ~35s:
+it stops shard-2, waits for the coordinator to deregister it, restarts it,
+and asserts that state transfer restores the data. Requires docker and
+docker compose on the PATH.
 
-────────────────────────────────────────────────────────────────
-TIER 3 — Full restart test (manual setup required)
-────────────────────────────────────────────────────────────────
-1.  Start coordinator + shards 50051/50052/50053 as above.
-2.  Run the seed step once to populate data:
-        pytest tests/test_state_transfer.py -v -k "seed"
-3.  Kill the shard on 50053 (Ctrl-C in its terminal).
-    Wait ~15 s for the coordinator to deregister it.
-4.  Restart the shard:
-        SERVER_PORT=50053 SKIP_STATE_TRANSFER=false python -m server
-5.  Once the shard logs "State transfer complete", run:
-        pytest tests/test_state_transfer.py -v -k "restart"
+    pytest tests/test_state_transfer.py -v -m "integration and slow"
 
 Run from src/:
     pytest tests/test_state_transfer.py -v
 """
 import hashlib
+import subprocess
 import sys
 import os
 import time
+from pathlib import Path
 
 import grpc
 import pytest
@@ -57,6 +43,9 @@ COORDINATOR = "localhost:50050"
 SHARD_51 = "localhost:50051"
 SHARD_53 = "localhost:50053"
 
+# docker-compose.yml lives two levels up from src/tests/
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
 # Small fixed dataset used across tiers — synthetic embeddings, dim=4 for unit tests.
 UNIT_ITEMS = [
     (1, "apple",  [1.0, 0.0, 0.0, 0.0]),
@@ -65,14 +54,13 @@ UNIT_ITEMS = [
     (4, "date",   [0.0, 0.0, 0.0, 1.0]),
 ]
 
-# Items upserted in Tier 2/3 via the real coordinator (full 384-dim embeddings
-# are computed by the coordinator from the text; we only supply text here).
+# Items used in Tier 2 via the live coordinator.
 INTEGRATION_ITEMS = [
-    (101, "state transfer test item one"),
-    (102, "state transfer test item two"),
-    (103, "state transfer test item three"),
-    (104, "state transfer test item four"),
-    (105, "state transfer test item five"),
+    (201, "state transfer test item one"),
+    (202, "state transfer test item two"),
+    (203, "state transfer test item three"),
+    (204, "state transfer test item four"),
+    (205, "state transfer test item five"),
 ]
 INTEGRATION_COUNT = len(INTEGRATION_ITEMS)
 
@@ -183,25 +171,26 @@ class TestGetPeersArcMathUnit:
             int(peer.start_hash, 16)
 
 
-# ─── Tier 2: live integration tests ───────────────────────────────────────────
+# ─── Tier 2: integration tests ────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def ctrl_stub():
+def ctrl_stub(compose_cluster):
     return vector_store_pb2_grpc.CoordinatorControlStub(
         grpc.insecure_channel(COORDINATOR)
     )
 
 
 @pytest.fixture(scope="module")
-def coord_stub():
+def coord_stub(compose_cluster):
     return vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(COORDINATOR))
 
 
 @pytest.fixture(scope="module")
-def shard51_stub():
+def shard51_stub(compose_cluster):
     return vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_51))
 
 
+@pytest.mark.integration
 class TestGetPeersIntegration:
     """GetPeers over the wire against a live coordinator."""
 
@@ -216,7 +205,6 @@ class TestGetPeersIntegration:
         resp = ctrl_stub.GetPeers(
             vector_store_pb2.GetPeersRequest(host="localhost:59999")
         )
-        # At least the three default shards should be registered.
         assert len(resp.peers) >= 2
 
     def test_get_peers_arcs_contiguous(self, ctrl_stub):
@@ -230,6 +218,7 @@ class TestGetPeersIntegration:
             assert peers[i].end_hash == peers[i + 1].start_hash
 
 
+@pytest.mark.integration
 class TestDumpIntegration:
     """Dump RPC against a live shard — seeds a few items, dumps them back."""
 
@@ -297,56 +286,74 @@ class TestDumpIntegration:
         assert lower & upper == set()  # no overlap
 
 
-# ─── Tier 3: full restart test ────────────────────────────────────────────────
-
+@pytest.mark.integration
+@pytest.mark.slow
 class TestStateTransferRestart:
     """
-    Verifies that a restarted shard recovers its data via state transfer.
+    Full state-transfer cycle: seed data, stop a shard, restart it, verify recovery.
 
-    See module docstring for manual setup steps before running these tests.
+    Orchestrates the docker compose cluster via subprocess. Requires docker and
+    docker compose on the PATH. Takes ~35s (15s for coordinator to deregister the
+    shard + transfer time).
     """
 
-    def test_seed(self, coord_stub):
-        """Seed step — run this before killing shard 50053."""
+    def test_shard_recovers_data_after_restart(self, coord_stub):
+        # Seed data through the coordinator.
         items = [
             vector_store_pb2.UpsertItem(id=item_id, text=text)
             for item_id, text in INTEGRATION_ITEMS
         ]
         coord_stub.UpsertBatch(
-            vector_store_pb2.UpsertBatchRequest(items=items, trace_id="test-restart-seed")
+            vector_store_pb2.UpsertBatchRequest(items=items, trace_id="restart-seed")
         )
-        shard53 = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_53))
-        count = shard53.Count(vector_store_pb2.CountRequest()).count
-        assert count >= INTEGRATION_COUNT, (
-            f"Seed failed: shard 50053 has {count} items, expected >= {INTEGRATION_COUNT}"
+        time.sleep(1)
+
+        # Stop shard-2 (port 50053 in docker-compose.yml).
+        subprocess.run(
+            ["docker", "compose", "stop", "shard-2"],
+            cwd=str(PROJECT_ROOT),
+            check=True,
         )
 
-    def test_restart_shard_has_transferred_data(self):
-        """
-        Run after restarting shard 50053 with state transfer enabled.
-        The shard should have seeded itself from peers and report >= INTEGRATION_COUNT items.
-        """
-        shard53 = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_53))
-        count = shard53.Count(vector_store_pb2.CountRequest()).count
-        assert count >= INTEGRATION_COUNT, (
-            f"State transfer incomplete: shard 50053 has {count} items, "
-            f"expected >= {INTEGRATION_COUNT}. "
-            "Check that the shard logged 'State transfer complete' before running this test."
+        # Wait for coordinator to deregister (default HEARTBEAT_TIMEOUT_S = 15s).
+        time.sleep(20)
+
+        # Restart — state transfer runs automatically before re-registration.
+        subprocess.run(
+            ["docker", "compose", "start", "shard-2"],
+            cwd=str(PROJECT_ROOT),
+            check=True,
         )
 
-    def test_restart_shard_search_returns_results(self):
+        # Poll until the shard reports the expected item count (up to 30s).
+        shard = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_53))
+        deadline = time.time() + 30
+        recovered = False
+        while time.time() < deadline:
+            try:
+                count = shard.Count(vector_store_pb2.CountRequest(), timeout=2).count
+                if count >= INTEGRATION_COUNT:
+                    recovered = True
+                    break
+            except grpc.RpcError:
+                pass
+            time.sleep(1)
+
+        assert recovered, (
+            f"Shard did not recover {INTEGRATION_COUNT} items within 30s after restart"
+        )
+
+    def test_recovered_shard_search_returns_results(self):
         """Transferred data should be searchable, not just counted."""
-        shard53 = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_53))
-        # Embed a query manually — use a known item's text so we expect a match.
-        # We can't call the coordinator's embedding model here directly, but we
-        # can verify the shard returns *something* for a plausible query vector.
-        query = [0.1] * 384
-        resp = shard53.Search(vector_store_pb2.SearchRequest(
-            query_text="state transfer test item",
-            query_vector=query,
-            top_k=3,
-            trace_id="test-restart-search",
-        ))
+        shard = vector_store_pb2_grpc.VectorStoreStub(grpc.insecure_channel(SHARD_53))
+        resp = shard.Search(
+            vector_store_pb2.SearchRequest(
+                query_text="state transfer test item",
+                query_vector=[0.1] * 384,
+                top_k=3,
+                trace_id="restart-search",
+            )
+        )
         assert len(resp.results) > 0, (
-            "Shard 50053 returned no search results after state transfer"
+            "Shard returned no search results after state transfer"
         )

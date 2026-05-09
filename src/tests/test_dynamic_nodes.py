@@ -1,17 +1,18 @@
 """
 RegisterNode / DeregisterNode integration tests.
 
-Requires the coordinator to be running (port 50050).
-The 4th shard process does NOT need to be running — these tests only
-exercise the coordinator's control plane (ring membership), not actual upserts.
+Requires the docker compose cluster (coordinator + shards) to be running.
+Run: docker compose up -d, then pytest -m integration
 
 Run from src/:
-    pytest tests/test_dynamic_nodes.py -s
+    pytest tests/test_dynamic_nodes.py -v
 """
 import grpc
 import pytest
 import vector_store_pb2
 import vector_store_pb2_grpc
+
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("compose_cluster")]
 
 COORDINATOR = "localhost:50050"
 EXTRA_HOST = "localhost:50054"
@@ -52,4 +53,4 @@ def test_deregister_node(ctrl):
 
 def test_deregister_unknown_node_fails(ctrl):
     resp = ctrl.DeregisterNode(vector_store_pb2.NodeRequest(host=EXTRA_HOST))
-    assert not resp.success, "Deregistering a node that isn't in the ring should return success=False"
+    assert not resp.success, "Deregistering a node not in the ring should return success=False"

@@ -1,7 +1,7 @@
 import pytest
-import sys
-import os
 from client.vector_store_client import VectorStoreClient
+
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("compose_cluster")]
 
 
 @pytest.fixture
