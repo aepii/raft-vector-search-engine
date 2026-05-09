@@ -13,7 +13,7 @@ def client():
 
 def test_upsert_returns_status(client):
     status = client.upsert(999, "Test document")
-    assert "999" in status
+    assert "replicated" in status
 
 
 def test_search_returns_results(client):

@@ -33,8 +33,9 @@ def _probe_coordinator() -> bool:
         ch = grpc.insecure_channel(
             COORDINATOR_ADDR, options=[("grpc.enable_retries", 0)]
         )
-        stub = vector_store_pb2_grpc.VectorStoreStub(ch)
-        stub.Count(vector_store_pb2.CountRequest(), timeout=2)
+        stub = vector_store_pb2_grpc.CoordinatorControlStub(ch)
+        # GetPeers is a lightweight read-only RPC that the coordinator always serves.
+        stub.GetPeers(vector_store_pb2.GetPeersRequest(host="probe:0"), timeout=2)
         ch.close()
         return True
     except Exception:
