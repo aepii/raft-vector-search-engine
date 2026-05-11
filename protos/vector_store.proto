@@ -7,12 +7,18 @@ service VectorStore {
   rpc UpsertBatch(UpsertBatchRequest) returns (UpsertBatchResponse);
     // Client sends query string; Server returns top_k strings
   rpc Search(SearchRequest) returns (SearchResponse);
+    // Returns the number of items stored on this node
+  rpc Count(CountRequest) returns (CountResponse);
+    // Streams all locally stored items whose key hash falls in [start_hash, end_hash).
+    // Used by recovering shards during state transfer. Coordinator does not implement this.
+  rpc Dump(DumpRequest) returns (stream DumpItem);
 }
 
 // -- Upsert --
 message UpsertItem {
-  int64  id   = 1;
-  string text = 2;
+  int64          id        = 1;
+  string         text      = 2;
+  repeated float embedding = 3;  // pre-computed by coordinator; shards store directly
 }
 
 message UpsertRequest {
@@ -36,9 +42,10 @@ message UpsertBatchResponse {
 
 // -- Search --
 message SearchRequest {
-  string query_text = 1;
-  int32  top_k      = 2;
-  string trace_id   = 3;
+  string         query_text   = 1;
+  int32          top_k        = 2;
+  string         trace_id     = 3;
+  repeated float query_vector = 4;  // pre-computed by coordinator; shards use directly
 }
 
 message SearchResponse {
@@ -48,4 +55,62 @@ message SearchResponse {
 message SearchResult {
   string text  = 1;
   float  score = 2;
+}
+
+// -- Count --
+message CountRequest {}
+message CountResponse { int32 count = 1; }
+
+// -- Coordinator control (coordinator only, not exposed on shards) --
+service CoordinatorControl {
+  rpc RegisterNode(NodeRequest) returns (NodeResponse);
+  rpc DeregisterNode(NodeRequest) returns (NodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc GetPeers(GetPeersRequest) returns (GetPeersResponse);
+}
+
+// -- Heartbeat --
+message HeartbeatRequest {
+  string host = 1;
+}
+
+message HeartbeatResponse {
+  bool registered = 1;
+}
+
+message NodeRequest {
+  string host = 1;
+}
+
+message NodeResponse {
+  bool   success    = 1;
+  string message    = 2;
+  int32  node_count = 3;
+}
+
+// -- Dump --
+message DumpRequest {
+  string start_hash = 1;  // inclusive lower bound (SHA-256 hex of str(id))
+  string end_hash   = 2;  // exclusive upper bound; empty string means no upper bound
+}
+
+message DumpItem {
+  int64          id        = 1;
+  string         text      = 2;
+  repeated float embedding = 3;
+}
+
+// -- GetPeers --
+message GetPeersRequest {
+  string host = 1;  // calling shard's own host, excluded from the response
+}
+
+message PeerAssignment {
+  string host       = 1;
+  string start_hash = 2;
+  string end_hash   = 3;
+}
+
+message GetPeersResponse {
+  repeated PeerAssignment peers = 1;
 }

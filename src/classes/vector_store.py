@@ -1,25 +1,137 @@
-from typing import Dict, List
-import numpy as np
+import sqlite3
+import struct
+import threading
+
+import sqlite_vec
+
+# Output dimension of all-MiniLM-L6-v2, the embedding model used by the coordinator.
+EMBEDDING_DIM = 384
 
 
 class VectorStore:
-    """An in-memory storage for vector embeddings and their metadata."""
+    """sqlite-vec-backed storage for vector embeddings and their metadata."""
 
-    def __init__(self) -> None:
-        """Initializes the vector store."""
-        # Maps an item_id to the vector embedding
-        self.store: Dict[int, np.ndarray] = {}
-        # Maps an item_id to the original text content
-        self.metadata = {}
-
-    def upsert(self, item_id: int, text: str, embedding: np.ndarray) -> None:
+    def __init__(self, db_path: str = ":memory:", dim: int = EMBEDDING_DIM) -> None:
         """
-        Inserts or updates a vector and its metadata.
+        Initializes the vector store.
+
+        Args:
+            db_path: Path to the SQLite database file. Defaults to an in-memory
+                database, which is useful for tests. Pass a file path for
+                persistent storage.
+            dim: Embedding dimension. Defaults to EMBEDDING_DIM (384). Override
+                in tests when using smaller synthetic vectors.
+        """
+        self.dim = dim
+        # The gRPC server runs a ThreadPoolExecutor, so multiple threads can call
+        # upsert/search concurrently on the same VectorStore instance. check_same_thread=False
+        # removes sqlite3's thread guard, but does not make the connection thread-safe.
+        # The lock serializes all DB access to prevent SQLITE_MISUSE errors.
+        #
+        # Note: WAL journal mode (PRAGMA journal_mode=WAL) is intentionally not set.
+        # WAL allows concurrent readers during a write, but only helps if the lock
+        # below is replaced with a read-write lock (shared readers, exclusive writer).
+        # Setting WAL without that change does nothing — the lock still serializes
+        # everything. The two changes are coupled; revisit together if benchmarks show
+        # lock contention under concurrent write load.
+        self._lock = threading.Lock()
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.enable_load_extension(True)
+        sqlite_vec.load(self.conn)
+        self.conn.enable_load_extension(False)
+        self._create_tables()
+
+    def _create_tables(self) -> None:
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS items (
+                    id        INTEGER PRIMARY KEY,
+                    text      TEXT    NOT NULL,
+                    upsert_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+            """)
+            self.conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_items
+                    USING vec0(embedding float[{self.dim}] distance_metric=cosine)
+            """)
+
+    def upsert(self, item_id: int, text: str, embedding: list) -> None:
+        """
+        Inserts or updates a vector and its metadata atomically.
 
         Args:
             item_id: Unique identifier for the item.
             text: The raw string content.
-            embedding: The numerical representation of the text.
+            embedding: The numerical representation of the text as a list of floats.
         """
-        self.metadata[item_id] = text
-        self.store[item_id] = np.array(embedding)
+        packed = struct.pack(f"{self.dim}f", *embedding)
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO items(id, text) VALUES (?, ?)"
+                " ON CONFLICT(id) DO UPDATE SET text=excluded.text,"
+                " upsert_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                (item_id, text),
+            )
+            # vec0 virtual tables do not support ON CONFLICT, so upsert is DELETE + INSERT.
+            self.conn.execute("DELETE FROM vec_items WHERE rowid = ?", (item_id,))
+            self.conn.execute(
+                "INSERT INTO vec_items(rowid, embedding) VALUES (?, ?)",
+                (item_id, packed),
+            )
+
+    def search(self, embedding: list, top_k: int = 3) -> list[tuple[str, float]]:
+        """
+        Returns the top_k most similar items to the given embedding.
+
+        Args:
+            embedding: Query vector as a list of floats.
+            top_k: Number of results to return.
+
+        Returns:
+            A list of (text, score) tuples where score is cosine similarity
+            (1.0 = identical).
+        """
+        packed = struct.pack(f"{self.dim}f", *embedding)
+        with self._lock:
+            rows = self.conn.execute(
+                # The inner query does the knn search: vec_items returns the top_k nearest
+                # neighbours by cosine distance. The LIMIT must live here — vec0 requires it
+                # directly on the virtual table scan and will not accept it on an outer query.
+                # The outer query joins to items to retrieve the stored text for each result.
+                """
+                SELECT i.text, v.distance
+                FROM (
+                    SELECT rowid, distance
+                    FROM vec_items
+                    WHERE embedding MATCH ?
+                    LIMIT ?
+                ) v
+                JOIN items i ON i.id = v.rowid
+                ORDER BY v.distance
+                """,
+                (packed, top_k),
+            ).fetchall()
+        return [(text, 1.0 - distance) for text, distance in rows]
+
+    def count(self) -> int:
+        """Returns the number of items currently stored."""
+        with self._lock:
+            row = self.conn.execute("SELECT COUNT(*) FROM items").fetchone()
+        return row[0]
+
+    def scan(self) -> list[tuple[int, str, list[float]]]:
+        """Returns all stored items as (id, text, embedding) tuples.
+
+        Fetches all rows into memory in one query (lock held only for the fetch),
+        then unpacks the float blobs outside the lock. Acceptable for the current
+        dataset sizes; revisit if memory pressure becomes a concern at scale.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT i.id, i.text, v.embedding "
+                "FROM items i JOIN vec_items v ON v.rowid = i.id"
+            ).fetchall()
+        return [
+            (item_id, text, list(struct.unpack(f"{self.dim}f", emb_packed)))
+            for item_id, text, emb_packed in rows
+        ]

@@ -1,0 +1,63 @@
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: docker/coordinator/Dockerfile
+    ports:
+      - "50050:50050"
+    environment:
+      COORDINATOR_PORT: "50050"
+      REPLICATION_FACTOR: "0"
+    networks:
+      - vector-net
+
+  shard-0:
+    build:
+      context: .
+      dockerfile: docker/shard/Dockerfile
+    environment:
+      SERVER_PORT: "50051"
+      COORDINATOR_HOST: "coordinator:50050"
+      SHARD_HOST: "shard-0:50051"
+      DB_PATH: "/data/shard.db"
+    volumes:
+      - shard-0-data:/data
+    networks:
+      - vector-net
+
+  shard-1:
+    build:
+      context: .
+      dockerfile: docker/shard/Dockerfile
+    environment:
+      SERVER_PORT: "50051"
+      COORDINATOR_HOST: "coordinator:50050"
+      SHARD_HOST: "shard-1:50051"
+      DB_PATH: "/data/shard.db"
+    volumes:
+      - shard-1-data:/data
+    networks:
+      - vector-net
+
+  shard-2:
+    build:
+      context: .
+      dockerfile: docker/shard/Dockerfile
+    environment:
+      SERVER_PORT: "50051"
+      COORDINATOR_HOST: "coordinator:50050"
+      SHARD_HOST: "shard-2:50051"
+      DB_PATH: "/data/shard.db"
+    volumes:
+      - shard-2-data:/data
+    networks:
+      - vector-net
+
+volumes:
+  shard-0-data:
+  shard-1-data:
+  shard-2-data:
+
+networks:
+  vector-net:
+    driver: bridge

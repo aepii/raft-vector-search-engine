@@ -29,4 +29,4 @@ def test_semantic_similarity(client):
     client.upsert(11, "Java is a great programming language!")
     client.upsert(9, "Python snake!")
     results = client.search("Coding in python", top_k=1)
-    assert results[0] == "Python is a great programming language!"
+    assert results[0][0] == "Python is a great programming language!"
