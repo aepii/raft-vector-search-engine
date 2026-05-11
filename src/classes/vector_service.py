@@ -12,6 +12,8 @@ class VectorService:
         """Initializes the service and its dependencies."""
         self.embedding_model = EmbeddingModel()
         self.vector_store = VectorStore()
+        self._ids_cache = []
+        self._embeddings_cache = None
 
     def add_item(self, item_id: int, text: str) -> None:
         """
@@ -23,6 +25,7 @@ class VectorService:
         """
         query_embedding = self.embedding_model.encode(text)
         self.vector_store.upsert(item_id, text, query_embedding)
+        self._update_cache()
 
     def add_items_batch(self, items: list[tuple[int, str]]) -> None:
         """
@@ -35,6 +38,11 @@ class VectorService:
         query_embeddings = self.embedding_model.encode(texts)
         for (item_id, text), query_embedding in zip(items, query_embeddings):
             self.vector_store.upsert(item_id, text, query_embedding)
+        self._update_cache()
+
+    def _update_cache(self):
+        self._ids_cache = list(self.vector_store.store.keys())
+        self._embeddings_cache = np.array(list(self.vector_store.store.values()))
 
     def search(self, text: str, top_k: int = 3) -> list[tuple[str, float]]:
         """
@@ -47,21 +55,25 @@ class VectorService:
         Returns:
             A list of strings representing the top matches.
         """
+        if self._embeddings_cache is None or len(self._ids_cache) == 0:
+            return []
+
         # Encode the query string
         query_embedding = self.embedding_model.encode(text)
-        # Extract ids from the store
-        ids = list(self.vector_store.store.keys())
-        # Convert the store's values into a matrix
-        candidate_embeddings = np.array(list(self.vector_store.store.values()))
-        # Calculate similarities
-        similarities = self.embedding_model.similarity(
-            query_embedding, candidate_embeddings
-        )
-        # Get the top indices
-        top_results = torch.argsort(similarities, descending=True)[0][:top_k]
 
-        # Return the mapped indices back to metadata
+        dot = np.dot(self._embeddings_cache, query_embedding.T)
+        norm_store = np.linalg.norm(self._embeddings_cache, axis=1)
+        norm_query = np.linalg.norm(query_embedding)
+        similarities = dot / (norm_store * norm_query + 1e-10)
+
+        # Top-k efficiently
+        if top_k >= len(similarities):
+            top_indices = np.argsort(similarities)[::-1]
+        else:
+            top_indices = np.argpartition(-similarities, top_k)[:top_k]
+            top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
+
         return [
-            (self.vector_store.metadata[ids[i]], float(similarities[0][i]))
-            for i in top_results
+            (self.vector_store.metadata[self._ids_cache[i]], float(similarities[i]))
+            for i in top_indices
         ]
