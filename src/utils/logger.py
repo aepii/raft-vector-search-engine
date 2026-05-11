@@ -14,7 +14,7 @@ def get_logger(name: str):
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-        logger.setLevel(logging.CRITICAL)
+        logger.setLevel(logging.INFO)
 
     return logger
 
